@@ -1,2 +1,6 @@
 flask
 requests
+os
+json
+random
+emoji
