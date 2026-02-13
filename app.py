@@ -7,20 +7,24 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# --- الإعدادات (تأكد من صحتها) ---
-PAGE_ACCESS_TOKEN = "EAAZAk5uTK21kBQvGC0p1WhxFiYSlj28NjqPFG6DhyWKjWV8vJzexqNIpNt0Kl8hdYZCyYrw4Bx5xztkoTy54bZALHvXH6JXBIA8ipHZBkXUJy2tywX5ZBqxcYBFdK2uwoLbH9rPhxGJGl7RdtQasrfF12fRt1ec13nJC4odlHXnpCfOU01LcauY6pSFfrOoi9tmW4a9OxagZDZD"
-VERIFY_TOKEN = "mostapha1"
-ADMIN_FB_ID ="61581687606169" # سيصلك الإشعار هنا
-DATA_FILE = 'djezzy_fb_data.json'
+# --- الإعدادات الآمنة (يتم جلبها من إعدادات Render) ---
+PAGE_ACCESS_TOKEN = os.environ.get('PAGE_ACCESS_TOKEN')
+VERIFY_TOKEN = os.environ.get('VERIFY_TOKEN', 'mostapha1') # قيمة افتراضية إذا لم تجدها
+ADMIN_FB_ID = os.environ.get('ADMIN_FB_ID')
+DATA_FILE = '/opt/render/project/src/djezzy_fb_data.json' # مسار الحفظ في Render (اختياري)
 
 # --- إدارة البيانات ---
 def load_db():
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+        except: return {}
     return {}
 
 def save_db(db):
-    with open(DATA_FILE, 'w', encoding='utf-8') as f: json.dump(db, f, indent=4)
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f: json.dump(db, f, indent=4)
+    except: pass
 
 # --- وظائف Djezzy API ---
 def send_otp(msisdn):
@@ -59,10 +63,12 @@ def apply_walkwin_2gb(msisdn, token):
 
 # --- وظائف الإرسال ---
 def send_text(sid, text):
+    if not PAGE_ACCESS_TOKEN: return
     url = f"https://graph.facebook.com/v19.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
     requests.post(url, json={"recipient": {"id": sid}, "message": {"text": text}})
 
 def send_main_menu(sid):
+    if not PAGE_ACCESS_TOKEN: return
     url = f"https://graph.facebook.com/v19.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
     payload = {
         "recipient": {"id": sid},
@@ -95,9 +101,6 @@ def webhook():
         for entry in data["entry"]:
             for event in entry.get("messaging", []):
                 sid = str(event["sender"]["id"])
-                # طباعة الـ ID في Termux ليسهل عليك معرفة الـ ADMIN_FB_ID
-                print(f"User ID: {sid}") 
-                
                 user = db.get(sid, {"state": "START"})
 
                 if "postback" in event:
@@ -107,14 +110,12 @@ def webhook():
                         success, msg = apply_walkwin_2gb(user["msisdn"], user["token"])
                         send_text(sid, msg)
                         
-                        # إرسال إشعار للمدير عند النجاح
-                        if success:
+                        if success and ADMIN_FB_ID:
                             notify_msg = f"🔔 مبروك مدير! مستخدم جديد فعل الهدية بنجاح:\n📞 الرقم: {user['msisdn']}\n🆔 أيدي المستخدم: {sid}"
                             send_text(ADMIN_FB_ID, notify_msg)
 
                 elif "message" in event and "text" in event["message"]:
                     text = event["message"]["text"].strip()
-
                     if all(char in emoji.EMOJI_DATA for char in text):
                         send_text(sid, text)
                         continue
@@ -146,4 +147,6 @@ def webhook():
     return "ok", 200
 
 if __name__ == "__main__":
-    app.run(port=5000)
+    # هذا السطر مهم جداً ليعمل البوت على Render
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
